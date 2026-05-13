@@ -671,8 +671,13 @@
       }, []);
 
       const handleUpdate = () => {
-        // URL 변경 없는 일반 새로고침 (CDN으로 React/Tailwind 등이 로드되므로 충분)
-        window.location.reload();
+        // 쿼리 파라미터·해시 모두 제거한 클린 URL로 이동 후 새로고침
+        const cleanUrl = window.location.origin + window.location.pathname;
+        if (window.location.href !== cleanUrl) {
+          window.location.replace(cleanUrl);
+        } else {
+          window.location.reload();
+        }
       };
 
       const handlePrint = () => {
