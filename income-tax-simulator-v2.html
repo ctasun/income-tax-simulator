@@ -424,6 +424,16 @@
 
       useEffect(() => { focusFirst(); }, []);
 
+      // 캐시버스팅 파라미터(_) 제거 → 즐겨찾기 URL 매칭 유지
+      useEffect(() => {
+        const url = new URL(window.location.href);
+        if (url.searchParams.has("_")) {
+          url.searchParams.delete("_");
+          const clean = url.pathname + (url.search ? url.search : "") + url.hash;
+          window.history.replaceState({}, "", clean);
+        }
+      }, []);
+
       // GitHub API로 income-tax-simulator-v2.html의 마지막 커밋 시각 조회 → KST 표시
       useEffect(() => {
         const apiUrl = "https://api.github.com/repos/ctasun/income-tax-simulator/commits?path=income-tax-simulator-v2.html&per_page=1";
