@@ -15,6 +15,62 @@
     html, body, #root { height: 100%; margin: 0; padding: 0; }
     body { font-family: "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     kbd { font-family: "Noto Sans KR", monospace; }
+
+    /* ===== 인쇄 전용 스타일: A4 세로 1페이지 ===== */
+    @media print {
+      @page {
+        size: A4 portrait;
+        margin: 10mm;
+      }
+
+      /* 색상 보존 (잉크 절약 모드 무력화) */
+      * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        color-adjust: exact !important;
+      }
+
+      /* 화면용 제약 해제 */
+      html, body, #root {
+        height: auto !important;
+        min-height: 0 !important;
+        overflow: visible !important;
+        background: white !important;
+      }
+      body { font-size: 11px !important; }
+      .h-screen { height: auto !important; }
+      .overflow-hidden { overflow: visible !important; }
+      .flex-1 { flex: 0 0 auto !important; }
+      .bg-slate-100 { background: white !important; }
+      .max-w-7xl { max-width: none !important; }
+
+      /* 인쇄 시 숨김 (인쇄 버튼·업데이트/초기화/키보드 안내) */
+      .no-print { display: none !important; }
+
+      /* 메인 그리드: 1열 세로 배치 강제 (입력 위 → 결과 아래) */
+      .print-main-grid {
+        display: block !important;
+      }
+      .print-main-grid > div {
+        width: 100% !important;
+        max-width: none !important;
+        margin-bottom: 6px !important;
+      }
+
+      /* 각 섹션 페이지 분할 방지 */
+      .print-section {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+      .print-result {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        height: auto !important;
+      }
+
+      /* 컴팩트 패딩 */
+      .print-main-grid .p-2\.5 { padding: 6px !important; }
+    }
   </style>
 </head>
 <body class="bg-slate-100">
@@ -207,6 +263,14 @@
       </svg>
     );
 
+    const PrinterIcon = ({ className }) => (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+        <polyline points="6 9 6 2 18 2 18 9"/>
+        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+        <rect x="6" y="14" width="12" height="8"/>
+      </svg>
+    );
+
     const RrnInput = ({ value, onChange }) => (
       <input
         type="text"
@@ -382,7 +446,7 @@
         slate:   "border-slate-200 bg-white",
       };
       return (
-        <div className={`rounded-lg border ${colors[accent || "slate"]} p-2.5`}>
+        <div className={`print-section rounded-lg border ${colors[accent || "slate"]} p-2.5`}>
           <div className="flex items-center gap-2 mb-1.5">
             <h3 className="text-sm font-bold text-slate-800">{title}</h3>
             {headerRight && <div className="ml-auto flex items-center gap-1.5">{headerRight}</div>}
@@ -410,7 +474,7 @@
       const sumLabel       = isRefund ? "총 환급예정세액" : "총 부담세액";
 
       return (
-        <div className="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col h-full">
+        <div className="print-result rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col h-full">
           <div className={`${headerBg} text-white p-3 flex-shrink-0`}>
             <div className="flex items-baseline justify-between">
               <span className="text-xs opacity-90">{headerLabel}</span>
@@ -612,6 +676,10 @@
         window.location.replace(url.toString());
       };
 
+      const handlePrint = () => {
+        window.print();
+      };
+
       const handleKeyDown = (e) => {
         if (e.target.tagName !== "INPUT") return;
         if (e.target.type === "checkbox") return;
@@ -704,6 +772,18 @@
         ? "⚠️ 100% 환급 불가 (다른 소득으로 결정세액>0)"
         : null;
 
+      // ② 소득공제 헤더 우측 인쇄 버튼
+      const printButton = (
+        <button
+          onClick={handlePrint}
+          title="현재 화면을 A4 1페이지 세로로 인쇄"
+          className="no-print flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50"
+          tabIndex={-1}
+        >
+          <PrinterIcon className="w-3 h-3" /> 인쇄
+        </button>
+      );
+
       return (
         <div ref={containerRef} onKeyDown={handleKeyDown} className="h-screen bg-slate-100 overflow-hidden flex flex-col">
           <div className="max-w-7xl w-full mx-auto px-3 py-2 flex flex-col flex-1 overflow-hidden">
@@ -722,7 +802,7 @@
                   인적용역 940xxx 자동환산
                 </span>
               </div>
-              <div className="flex items-center gap-2 text-[11px] text-slate-500">
+              <div className="no-print flex items-center gap-2 text-[11px] text-slate-500">
                 <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 rounded">
                   <ClockIcon className="w-3 h-3 text-slate-400" />
                   최종 업데이트
@@ -746,7 +826,7 @@
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-x-2 gap-y-0 md:gap-y-2 items-stretch">
+            <div className="print-main-grid grid grid-cols-1 md:grid-cols-5 gap-x-2 gap-y-0 md:gap-y-2 items-stretch">
 
               <div className="md:col-span-3 flex flex-col gap-2">
 
@@ -775,7 +855,7 @@
                   </div>
                 </Section>
 
-                <Section title="② 소득공제" accent="emerald">
+                <Section title="② 소득공제" accent="emerald" headerRight={printButton}>
                   <div className="space-y-2">
                     <div>
                       <p className="text-[11px] text-slate-500 mb-1">
