@@ -23,6 +23,7 @@
     const { useState, useMemo, useEffect, useRef } = React;
 
     const TAX_YEAR = 2025;
+    const WITHHOLDING_RATE = 0.03; // 인적용역 원천징수율 3% 고정
 
     const BRACKETS = [
       { limit: 14_000_000,    rate: 0.06, deduction: 0,          label: "1,400만원 이하" },
@@ -35,6 +36,60 @@
       { limit: Infinity,      rate: 0.45, deduction: 65_940_000, label: "10억원 초과" },
     ];
 
+    const BUSINESS_CODES = {
+      "940100": { name: "작가",                       basic: 58.7, excess: 42.2 },
+      "940200": { name: "화가 및 관련예술가",         basic: 68.0, excess: 55.2 },
+      "940301": { name: "작곡가",                     basic: 49.7, excess: 29.6 },
+      "940302": { name: "배우 등",                    basic: 29.0, excess: 10.6 },
+      "940303": { name: "모델",                       basic: 40.9, excess: 17.3 },
+      "940304": { name: "가수",                       basic: 13.5, excess: 4.2  },
+      "940305": { name: "성악가 등",                  basic: 61.6, excess: 46.2 },
+      "940306": { name: "1인미디어콘텐츠창작자",      basic: 64.1, excess: 49.7 },
+      "940500": { name: "연예보조서비스",             basic: 70.9, excess: 59.3 },
+      "940600": { name: "자문·감독·지도·고문료",     basic: 58.4, excess: 41.8 },
+      "940901": { name: "바둑기사",                   basic: 62.6, excess: 47.6 },
+      "940902": { name: "꽃꽂이 및 요리교사",         basic: 81.8, excess: 74.5 },
+      "940903": { name: "재단사 및 학원강사",         basic: 61.7, excess: 46.4 },
+      "940904": { name: "직업운동가",                 basic: 54.5, excess: 36.3 },
+      "940905": { name: "유흥접객원 및 댄서",         basic: 61.7, excess: 46.4 },
+      "940906": { name: "보험설계사",                 basic: 77.6, excess: 68.6 },
+      "940907": { name: "음료품배달원",               basic: 80.0, excess: 72.0 },
+      "940908": { name: "서적 및 화장품외판원",       basic: 75.0, excess: 65.0 },
+      "940909": { name: "컴퓨터프로그래머",           basic: 64.1, excess: 49.7 },
+      "940910": { name: "다단계판매원 후원수당",      basic: 67.8, excess: 54.9 },
+      "940911": { name: "기타 모집수당·채권회수수당", basic: 67.7, excess: 54.8 },
+      "940912": { name: "개인간병인",                 basic: 80.2, excess: 72.3 },
+      "940913": { name: "대리운전기사",               basic: 73.7, excess: 63.2 },
+      "940914": { name: "골프장캐디",                 basic: 74.3, excess: 64.0 },
+      "940915": { name: "목욕관리사",                 basic: 78.2, excess: 69.5 },
+      "940916": { name: "행사도우미",                 basic: 69.8, excess: 57.7 },
+      "940917": { name: "심부름용역원",               basic: 71.5, excess: 60.1 },
+      "940918": { name: "퀵서비스배달원",             basic: 79.4, excess: 71.2 },
+      "940919": { name: "이삿짐운반원",               basic: 74.2, excess: 63.9 },
+      "940920": { name: "학습지 방문강사",            basic: 75.0, excess: 65.0 },
+      "940921": { name: "교육교구 방문강사",          basic: 75.6, excess: 65.8 },
+      "940922": { name: "대여제품 방문점검원",        basic: 75.0, excess: 65.0 },
+      "940923": { name: "대출모집인",                 basic: 67.5, excess: 54.5 },
+      "940924": { name: "신용카드회원모집인",         basic: 71.3, excess: 59.8 },
+      "940925": { name: "방과후강사",                 basic: 69.3, excess: 57.0 },
+      "940926": { name: "소프트웨어프리랜서",         basic: 64.4, excess: 50.2 },
+      "940927": { name: "관광통역안내사",             basic: 64.1, excess: 49.7 },
+      "940928": { name: "어린이통학버스기사",         basic: 72.4, excess: 61.4 },
+      "940929": { name: "중고자동차판매원",           basic: 75.0, excess: 65.0 },
+    };
+
+    const FOUR_M = 40_000_000;
+
+    const calcBusinessIncomeFromRevenue = (revenue, info) => {
+      if (!info || !revenue || revenue <= 0) return 0;
+      if (revenue <= FOUR_M) {
+        return Math.floor(revenue * (1 - info.basic / 100));
+      }
+      const baseExpense   = FOUR_M * (info.basic  / 100);
+      const excessExpense = (revenue - FOUR_M) * (info.excess / 100);
+      return Math.floor(revenue - baseExpense - excessExpense);
+    };
+
     const calcTax = (taxBase) => {
       if (taxBase <= 0) return { tax: 0, bracket: null, marginalRate: 0 };
       for (const b of BRACKETS) {
@@ -45,15 +100,11 @@
       return { tax: 0, bracket: null, marginalRate: 0 };
     };
 
-    // 결정세액 = 0이 되는 최대 과세표준 찾기
-    // 조건: floor(base × rate − deduction) ≤ taxCredit 만족 최대 정수 base
     const findMaxBaseZeroTax = (taxCredit) => {
       if (taxCredit <= 0) return 0;
       let lowerLimit = 0;
       for (const b of BRACKETS) {
-        // 후보: base × rate − deduction < taxCredit + 1 → base < (taxCredit + 1 + deduction) / rate
         let candidate = Math.ceil((taxCredit + 1 + b.deduction) / b.rate) - 1;
-        // 부동소수점 보정 (보통 0~2회)
         let safety = 0;
         while (candidate > 0 && Math.floor(candidate * b.rate - b.deduction) > taxCredit && safety < 5) {
           candidate--; safety++;
@@ -186,6 +237,73 @@
       );
     };
 
+    // ① 종합소득금액 헤더 옆 인라인 박스 — 총수입금액 (placeholder 안내 글자만)
+    const InlineRevenueInput = ({ value, onChange, firstFocus }) => {
+      const [draft, setDraft] = useState(null);
+      const isDraft = draft !== null;
+      const display = isDraft ? draft : (value === 0 ? "" : fmt(value));
+
+      const commit = () => {
+        if (!isDraft) return;
+        const r = evalExpression(draft);
+        if (r.valid && r.value !== null) onChange(r.value);
+        setDraft(null);
+      };
+
+      return (
+        <div className="relative">
+          <input
+            type="text"
+            inputMode="text"
+            data-nav="primary"
+            data-first={firstFocus ? "true" : undefined}
+            value={display}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const cleaned = raw.replace(/[,\s]/g, "");
+              const hasOp = /[+\-*/]/.test(cleaned.slice(1)) || /^[*/]/.test(cleaned);
+              if (hasOp) {
+                setDraft(raw);
+              } else {
+                const numeric = cleaned.replace(/[^\d]/g, "");
+                if (numeric === "") { onChange(0); }
+                else { const n = parseInt(numeric, 10); if (!isNaN(n)) onChange(n); }
+                setDraft(null);
+              }
+            }}
+            onFocus={(e) => e.target.select()}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === "Enter") commit(); }}
+            placeholder="총수입금액 입력"
+            style={{ width: "156px" }}
+            className={`px-2.5 py-1 ${value > 0 ? "pr-7" : "pr-2.5"} text-right text-xs border rounded-md focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none tabular-nums ${value > 0 ? "border-blue-400 bg-blue-50 text-blue-900 font-semibold" : "border-slate-300 bg-white"}`}
+          />
+          {value > 0 && <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 pointer-events-none">원</span>}
+        </div>
+      );
+    };
+
+    // ① 종합소득금액 헤더 옆 인라인 박스 — 업종코드 (placeholder 안내 글자만)
+    const InlineCodeInput = ({ value, onChange }) => {
+      const display = (value || "").replace(/[^\d]/g, "").substring(0, 6);
+      const matched = !!BUSINESS_CODES[display];
+      const unmatched = display.length === 6 && !matched;
+      return (
+        <input
+          type="text"
+          inputMode="numeric"
+          data-nav="primary"
+          value={display}
+          onChange={(e) => onChange(e.target.value.replace(/[^\d]/g, "").substring(0, 6))}
+          onFocus={(e) => e.target.select()}
+          placeholder="업종코드 입력"
+          maxLength={6}
+          style={{ width: "110px" }}
+          className={`px-2.5 py-1 text-xs text-center border rounded-md focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none tabular-nums ${matched ? "border-blue-400 bg-blue-50 text-blue-900 font-semibold" : unmatched ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-300 bg-white"}`}
+        />
+      );
+    };
+
     const NumberInput = ({ label, value, onChange, hint, autoFilled, autoFilledMessage, autoFailMessage }) => {
       const [draft, setDraft] = useState(null);
       const isDraft = draft !== null;
@@ -256,7 +374,7 @@
       );
     };
 
-    const Section = ({ title, accent, children }) => {
+    const Section = ({ title, accent, headerRight, children }) => {
       const colors = {
         blue:    "border-blue-200 bg-blue-50/50",
         emerald: "border-emerald-200 bg-emerald-50/50",
@@ -265,7 +383,10 @@
       };
       return (
         <div className={`rounded-lg border ${colors[accent || "slate"]} p-2.5`}>
-          <h3 className="text-sm font-bold text-slate-800 mb-1.5">{title}</h3>
+          <div className="flex items-center gap-2 mb-1.5">
+            <h3 className="text-sm font-bold text-slate-800">{title}</h3>
+            {headerRight && <div className="ml-auto flex items-center gap-1.5">{headerRight}</div>}
+          </div>
           {children}
         </div>
       );
@@ -273,7 +394,6 @@
 
     const ResultPanel = ({ result, pensionPremium, otherDeduction, taxCredit, prepaid }) => (
       <div className="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col h-full">
-        {/* 파란 헤더 */}
         <div className="bg-gradient-to-br from-blue-600 to-blue-700 text-white p-3 flex-shrink-0">
           <div className="flex items-baseline justify-between">
             <span className="text-xs opacity-90">총 부담세액 · 실시간</span>
@@ -290,7 +410,6 @@
           )}
         </div>
 
-        {/* 상세 내역 */}
         <div className="flex-1 flex flex-col justify-between p-3 overflow-hidden">
           <div className="text-xs font-bold text-slate-800">상세 계산 내역</div>
 
@@ -368,6 +487,11 @@
 
     function App() {
       const containerRef = useRef(null);
+
+      const [businessCode,     setBusinessCode]     = useState("");
+      const [revenue,          setRevenue]          = useState(0);
+      const [bizAutoDisabled,  setBizAutoDisabled]  = useState(false);
+
       const [businessIncome,    _setBusinessIncome]    = useState(0);
       const [businessAutoFilled, setBusinessAutoFilled] = useState(false);
       const [laborIncome,       setLaborIncome]        = useState(0);
@@ -380,7 +504,12 @@
       const [prepaid,           _setPrepaid]           = useState(0);
       const [lastUpdated,       setLastUpdated]        = useState(null);
 
-      // 결정세액 0 임계 사업소득금액 (현재 입력값 기반 실시간 계산)
+      const businessInfo = BUSINESS_CODES[businessCode] || null;
+      const bizAutoActive = !!businessInfo && revenue > 0 && !bizAutoDisabled;
+
+      const autoBusinessIncome = bizAutoActive ? calcBusinessIncomeFromRevenue(revenue, businessInfo) : 0;
+      const autoPrepaid        = bizAutoActive ? Math.floor(revenue * WITHHOLDING_RATE) : 0;
+
       const maxBusinessForZeroDecided = useMemo(() => {
         const selfInfo = parseResidentId(selfRrn);
         const elderlyDed = selfInfo?.age >= 70 ? 1_000_000 : 0;
@@ -391,15 +520,27 @@
         return Math.max(0, maxBase + totalDeduction - laborIncome - otherIncome);
       }, [selfRrn, selfDisabled, pensionPremium, otherDeduction, taxCredit, laborIncome, otherIncome]);
 
-      // 사용자가 사업소득금액을 직접 수정 → 자동 모드 해제
+      const setBusinessCodeAndReset = (v) => {
+        setBusinessCode(v);
+        setBizAutoDisabled(false);
+      };
+      const setRevenueAndReset = (v) => {
+        setRevenue(v);
+        setBizAutoDisabled(false);
+      };
+
       const setBusinessIncome = (v) => {
         _setBusinessIncome(v);
+        if (bizAutoActive) setBizAutoDisabled(true);
         setBusinessAutoFilled(false);
       };
 
-      // 기납부세액 변경 시 자동 모드 진입/해제 (실제 값 갱신은 useEffect에서)
       const setPrepaid = (v) => {
         _setPrepaid(v);
+        if (bizAutoActive) {
+          setBizAutoDisabled(true);
+          return;
+        }
         if (v > 0 && businessIncome === 0 && !businessAutoFilled) {
           setBusinessAutoFilled(true);
         } else if (v === 0 && businessAutoFilled) {
@@ -408,33 +549,35 @@
         }
       };
 
-      // 자동 모드 + maxBusinessForZeroDecided 변경 시 사업소득금액 갱신
       useEffect(() => {
-        if (businessAutoFilled && prepaid > 0) {
+        if (bizAutoActive) {
+          _setBusinessIncome(autoBusinessIncome);
+          _setPrepaid(autoPrepaid);
+          setBusinessAutoFilled(false);
+        }
+      }, [bizAutoActive, autoBusinessIncome, autoPrepaid]);
+
+      useEffect(() => {
+        if (!businessInfo && bizAutoDisabled) setBizAutoDisabled(false);
+      }, [businessInfo]); // eslint-disable-line
+
+      useEffect(() => {
+        if (!bizAutoActive && businessAutoFilled && prepaid > 0) {
           _setBusinessIncome(maxBusinessForZeroDecided);
         }
-      }, [maxBusinessForZeroDecided, businessAutoFilled, prepaid]);
+      }, [maxBusinessForZeroDecided, businessAutoFilled, prepaid, bizAutoActive]);
 
       const focusFirst = () => {
         setTimeout(() => {
-          const first = containerRef.current?.querySelector('input[data-nav="primary"]');
-          if (first) { first.focus(); first.select?.(); }
+          const first = containerRef.current?.querySelector('input[data-first="true"]');
+          if (first) { first.focus(); first.select?.(); return; }
+          const fallback = containerRef.current?.querySelector('input[data-nav="primary"]');
+          if (fallback) { fallback.focus(); fallback.select?.(); }
         }, 100);
       };
 
       useEffect(() => { focusFirst(); }, []);
 
-      // 캐시버스팅 파라미터(_) 제거 → 즐겨찾기 URL 매칭 유지
-      useEffect(() => {
-        const url = new URL(window.location.href);
-        if (url.searchParams.has("_")) {
-          url.searchParams.delete("_");
-          const clean = url.pathname + (url.search ? url.search : "") + url.hash;
-          window.history.replaceState({}, "", clean);
-        }
-      }, []);
-
-      // GitHub API로 income-tax-simulator-v2.html의 마지막 커밋 시각 조회 → KST 표시
       useEffect(() => {
         const apiUrl = "https://api.github.com/repos/ctasun/income-tax-simulator/commits?path=income-tax-simulator-v2.html&per_page=1";
         fetch(apiUrl)
@@ -453,7 +596,6 @@
           .catch(() => setLastUpdated("확인 불가"));
       }, []);
 
-      // 캐시 무시 강제 새로고침
       const handleUpdate = () => {
         const url = new URL(window.location.href);
         url.searchParams.set("_", String(Date.now()));
@@ -519,6 +661,8 @@
       }, [businessIncome, laborIncome, otherIncome, selfRrn, selfDisabled, pensionPremium, otherDeduction, taxCredit, prepaid]);
 
       const reset = () => {
+        setBusinessCode(""); setRevenue(0);
+        setBizAutoDisabled(false);
         _setBusinessIncome(0); setLaborIncome(0); setOtherIncome(0);
         setSelfRrn(""); setSelfDisabled(false);
         setPensionPremium(0); setOtherDeduction(0);
@@ -527,11 +671,23 @@
         focusFirst();
       };
 
+      const bizIncomeAutoMessage = bizAutoActive
+        ? `🔄 ${businessInfo.name} · 단순경비율 자동환산`
+        : null;
+
+      const prepaidAutoMessage = bizAutoActive
+        ? `🔄 수입금액 × 3% 자동`
+        : (businessAutoFilled
+            ? "🔄 결정세액 0 임계점 · 100% 환급 한도"
+            : null);
+      const prepaidAutoFailMsg = (!bizAutoActive && businessAutoFilled)
+        ? "⚠️ 100% 환급 불가 (다른 소득으로 결정세액>0)"
+        : null;
+
       return (
         <div ref={containerRef} onKeyDown={handleKeyDown} className="h-screen bg-slate-100 overflow-hidden flex flex-col">
           <div className="max-w-7xl w-full mx-auto px-3 py-2 flex flex-col flex-1 overflow-hidden">
 
-            {/* 헤더 바 */}
             <div className="flex items-center justify-between mb-2 bg-white rounded-lg border border-slate-200 px-3 py-1.5 flex-shrink-0">
               <div className="flex items-center gap-2 flex-wrap">
                 <CalculatorIcon className="w-4 h-4 text-blue-600" />
@@ -541,6 +697,9 @@
                 </span>
                 <span className="text-[11px] px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded font-semibold hidden md:inline">
                   + − × ÷ 식 입력 가능
+                </span>
+                <span className="text-[11px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-semibold hidden md:inline">
+                  인적용역 940xxx 자동환산
                 </span>
               </div>
               <div className="flex items-center gap-2 text-[11px] text-slate-500">
@@ -567,21 +726,29 @@
               </div>
             </div>
 
-            {/* 본문 */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-x-2 gap-y-0 md:gap-y-2 items-stretch">
 
               <div className="md:col-span-3 flex flex-col gap-2">
 
-                <Section title="① 종합소득금액" accent="blue">
+                <Section
+                  title="① 종합소득금액"
+                  accent="blue"
+                  headerRight={
+                    <>
+                      <InlineRevenueInput value={revenue} onChange={setRevenueAndReset} firstFocus />
+                      <InlineCodeInput value={businessCode} onChange={setBusinessCodeAndReset} />
+                    </>
+                  }
+                >
                   <div className="gap-2" style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr" }}>
                     <NumberInput
                       label="사업소득금액"
                       value={businessIncome}
                       onChange={setBusinessIncome}
                       hint="총수입 − 필요경비 (예: 15000000+10000000)"
-                      autoFilled={businessAutoFilled}
-                      autoFilledMessage="🔄 결정세액 0 임계점 · 100% 환급 한도"
-                      autoFailMessage="⚠️ 100% 환급 불가 (다른 소득으로 결정세액>0)"
+                      autoFilled={bizAutoActive || businessAutoFilled}
+                      autoFilledMessage={bizIncomeAutoMessage || (businessAutoFilled ? "🔄 결정세액 0 임계점 · 100% 환급 한도" : null)}
+                      autoFailMessage={(!bizAutoActive && businessAutoFilled) ? "⚠️ 100% 환급 불가 (다른 소득으로 결정세액>0)" : null}
                     />
                     <NumberInput label="근로소득금액"      value={laborIncome} onChange={setLaborIncome} hint="총급여 − 근로소득공제" />
                     <NumberInput label="기타 종합소득금액" value={otherIncome} onChange={setOtherIncome} hint="이자·배당·연금·기타" />
@@ -620,6 +787,9 @@
                       label={<>원천징수·중간예납<span style={{ fontSize: "90%" }}> (결정세액에서 차감)</span></>}
                       value={prepaid}
                       onChange={setPrepaid}
+                      autoFilled={bizAutoActive || businessAutoFilled}
+                      autoFilledMessage={prepaidAutoMessage}
+                      autoFailMessage={prepaidAutoFailMsg}
                     />
                   </Section>
                 </div>
