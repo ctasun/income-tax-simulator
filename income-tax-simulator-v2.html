@@ -45,6 +45,30 @@
       return { tax: 0, bracket: null, marginalRate: 0 };
     };
 
+    // 결정세액 = 0이 되는 최대 과세표준 찾기
+    // 조건: floor(base × rate − deduction) ≤ taxCredit 만족 최대 정수 base
+    const findMaxBaseZeroTax = (taxCredit) => {
+      if (taxCredit <= 0) return 0;
+      let lowerLimit = 0;
+      for (const b of BRACKETS) {
+        // 후보: base × rate − deduction < taxCredit + 1 → base < (taxCredit + 1 + deduction) / rate
+        let candidate = Math.ceil((taxCredit + 1 + b.deduction) / b.rate) - 1;
+        // 부동소수점 보정 (보통 0~2회)
+        let safety = 0;
+        while (candidate > 0 && Math.floor(candidate * b.rate - b.deduction) > taxCredit && safety < 5) {
+          candidate--; safety++;
+        }
+        safety = 0;
+        while (Math.floor((candidate + 1) * b.rate - b.deduction) <= taxCredit && safety < 5) {
+          candidate++; safety++;
+        }
+        if (candidate >= lowerLimit && candidate <= b.limit) return candidate;
+        if (candidate > b.limit) { lowerLimit = b.limit; continue; }
+        return lowerLimit;
+      }
+      return BRACKETS[BRACKETS.length - 1].limit;
+    };
+
     const fmt = (n) => {
       if (!n || isNaN(n)) return "0";
       return Math.floor(Math.abs(n)).toLocaleString("ko-KR");
@@ -162,7 +186,7 @@
       );
     };
 
-    const NumberInput = ({ label, value, onChange, hint, autoFilled }) => {
+    const NumberInput = ({ label, value, onChange, hint, autoFilled, autoFilledMessage, autoFailMessage }) => {
       const [draft, setDraft] = useState(null);
       const isDraft = draft !== null;
       const display = isDraft ? draft : (value === 0 ? "" : fmt(value));
@@ -219,10 +243,13 @@
           {preview && !preview.valid && (
             <span className="text-[11px] text-rose-500 font-medium">식 오류 — 확인 필요</span>
           )}
-          {!preview && autoFilled && value > 0 && (
-            <span className="text-[11px] text-blue-600 font-semibold">🔄 자동 역산 (3% 가정) · 매출 추정치</span>
+          {!preview && autoFilled && value > 0 && autoFilledMessage && (
+            <span className="text-[11px] text-blue-600 font-semibold">{autoFilledMessage}</span>
           )}
-          {!preview && !(autoFilled && value > 0) && hint && (
+          {!preview && autoFilled && value === 0 && autoFailMessage && (
+            <span className="text-[11px] text-rose-500 font-semibold">{autoFailMessage}</span>
+          )}
+          {!preview && !(autoFilled && (value > 0 ? autoFilledMessage : autoFailMessage)) && hint && (
             <span className="text-[11px] text-slate-400">{hint}</span>
           )}
         </div>
@@ -353,29 +380,40 @@
       const [prepaid,           _setPrepaid]           = useState(0);
       const [lastUpdated,       setLastUpdated]        = useState(null);
 
+      // 결정세액 0 임계 사업소득금액 (현재 입력값 기반 실시간 계산)
+      const maxBusinessForZeroDecided = useMemo(() => {
+        const selfInfo = parseResidentId(selfRrn);
+        const elderlyDed = selfInfo?.age >= 70 ? 1_000_000 : 0;
+        const disabledDed = selfDisabled ? 2_000_000 : 0;
+        const personalDeduction = 1_500_000 + elderlyDed + disabledDed;
+        const totalDeduction = personalDeduction + pensionPremium + otherDeduction;
+        const maxBase = findMaxBaseZeroTax(taxCredit);
+        return Math.max(0, maxBase + totalDeduction - laborIncome - otherIncome);
+      }, [selfRrn, selfDisabled, pensionPremium, otherDeduction, taxCredit, laborIncome, otherIncome]);
+
       // 사용자가 사업소득금액을 직접 수정 → 자동 모드 해제
       const setBusinessIncome = (v) => {
         _setBusinessIncome(v);
         setBusinessAutoFilled(false);
       };
 
-      // 기납부세액 변경 시 3% 역산으로 사업소득금액 자동 채움
+      // 기납부세액 변경 시 자동 모드 진입/해제 (실제 값 갱신은 useEffect에서)
       const setPrepaid = (v) => {
         _setPrepaid(v);
-        if (businessIncome === 0 && v > 0) {
-          // 사업소득금액이 비어있을 때 자동 채움
-          _setBusinessIncome(Math.floor(v / 0.03));
+        if (v > 0 && businessIncome === 0 && !businessAutoFilled) {
           setBusinessAutoFilled(true);
-        } else if (businessAutoFilled) {
-          // 이미 자동 모드면 갱신
-          if (v === 0) {
-            _setBusinessIncome(0);
-            setBusinessAutoFilled(false);
-          } else {
-            _setBusinessIncome(Math.floor(v / 0.03));
-          }
+        } else if (v === 0 && businessAutoFilled) {
+          setBusinessAutoFilled(false);
+          _setBusinessIncome(0);
         }
       };
+
+      // 자동 모드 + maxBusinessForZeroDecided 변경 시 사업소득금액 갱신
+      useEffect(() => {
+        if (businessAutoFilled && prepaid > 0) {
+          _setBusinessIncome(maxBusinessForZeroDecided);
+        }
+      }, [maxBusinessForZeroDecided, businessAutoFilled, prepaid]);
 
       const focusFirst = () => {
         setTimeout(() => {
@@ -496,13 +534,11 @@
                 </span>
               </div>
               <div className="flex items-center gap-2 text-[11px] text-slate-500">
-                {/* 최종 업데이트 시각 */}
                 <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 bg-slate-50 rounded">
                   <ClockIcon className="w-3 h-3 text-slate-400" />
                   최종 업데이트
                   <span className="tabular-nums text-slate-800 font-medium ml-0.5">{lastUpdated || "..."}</span>
                 </span>
-                {/* 업데이트 버튼 */}
                 <button
                   onClick={handleUpdate}
                   title="캐시 무시 강제 새로고침"
@@ -524,7 +560,6 @@
             {/* 본문 */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-x-2 gap-y-0 md:gap-y-2 items-stretch">
 
-              {/* 왼쪽 입력 */}
               <div className="md:col-span-3 flex flex-col gap-2">
 
                 <Section title="① 종합소득금액" accent="blue">
@@ -535,6 +570,8 @@
                       onChange={setBusinessIncome}
                       hint="총수입 − 필요경비 (예: 15000000+10000000)"
                       autoFilled={businessAutoFilled}
+                      autoFilledMessage="🔄 결정세액 0 임계점 · 100% 환급 한도"
+                      autoFailMessage="⚠️ 100% 환급 불가 (다른 소득으로 결정세액>0)"
                     />
                     <NumberInput label="근로소득금액"      value={laborIncome} onChange={setLaborIncome} hint="총급여 − 근로소득공제" />
                     <NumberInput label="기타 종합소득금액" value={otherIncome} onChange={setOtherIncome} hint="이자·배당·연금·기타" />
@@ -573,7 +610,7 @@
                       label="원천징수·중간예납 (결정세액에서 차감)"
                       value={prepaid}
                       onChange={setPrepaid}
-                      hint="입력 시 사업소득금액 비어있으면 3% 역산 자동 채움"
+                      hint="입력 시 사업소득금액 비어있으면 100% 환급 임계점 자동 채움"
                     />
                   </Section>
                 </div>
