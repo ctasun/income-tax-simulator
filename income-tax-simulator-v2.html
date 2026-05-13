@@ -392,98 +392,108 @@
       );
     };
 
-    const ResultPanel = ({ result, pensionPremium, otherDeduction, taxCredit, prepaid }) => (
-      <div className="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col h-full">
-        <div className="bg-gradient-to-br from-blue-600 to-blue-700 text-white p-3 flex-shrink-0">
-          <div className="flex items-baseline justify-between">
-            <span className="text-xs opacity-90">총 부담세액 · 실시간</span>
-            <span className="text-2xl font-bold tabular-nums leading-tight">
-              {fmt(result.totalBurden)}
-              <span className="text-sm font-normal opacity-80 ml-1">원</span>
-            </span>
-          </div>
-          {prepaid > 0 && (
-            <div className="mt-2 pt-2 border-t border-white/20 flex justify-between text-xs">
-              <span className="opacity-80">{result.finalTax >= 0 ? "차감납부할 세액" : "환급예정세액"}</span>
-              <span className="font-bold tabular-nums">{fmt(result.finalTax)}원</span>
-            </div>
-          )}
-        </div>
+    const ResultPanel = ({ result, pensionPremium, otherDeduction, taxCredit, prepaid }) => {
+      const { isRefund, isZeroPrepaid } = result;
+      const finalTaxAbs = Math.abs(result.finalTax);
 
-        <div className="flex-1 flex flex-col justify-between p-3 overflow-hidden">
-          <div className="text-xs font-bold text-slate-800">상세 계산 내역</div>
+      // 헤더 분기
+      const headerLabel = isRefund ? "환급예정세액 · 실시간" : "총 부담세액 · 실시간";
+      const headerBg = isRefund ? "bg-emerald-600" : "bg-blue-600";
 
-          <div className="flex justify-between items-center text-[15px] text-slate-600">
-            <span>종합소득금액</span>
-            <span className="tabular-nums">{fmt(result.totalIncome)}원</span>
-          </div>
+      // 상세 내역 라벨/색상 분기
+      const incomeTaxLabel = isRefund ? "환급예정세액 (소득세분)" : "차감납부할 세액 (소득세분)";
+      const localLabel     = isRefund ? "지방소득세 환급 (×10%)"   : "지방소득세 (×10%)";
+      const refundColor    = isRefund ? "text-emerald-600" : "";
+      const subTotalBox    = isRefund
+        ? "bg-emerald-100 text-emerald-700"
+        : "bg-blue-100 text-blue-700";
+      const sumLabel       = isRefund ? "총 환급예정세액" : "총 부담세액";
 
-          <div>
-            <div className="flex justify-between items-center text-[13px] text-slate-700">
-              <span>(−) 종합소득공제</span>
-              <span className="tabular-nums">{fmt(result.totalDeduction)}원</span>
-            </div>
-            <div className="pl-3 text-[11px] text-slate-500 mt-0.5 space-y-0">
-              <div className="flex justify-between">
-                <span>인적공제 (본인{result.elderlyCount > 0 ? "·경로" : ""}{result.disabledCount > 0 ? "·장애" : ""})</span>
-                <span className="tabular-nums">{fmt(result.personalDeduction)}</span>
-              </div>
-              {pensionPremium > 0 && (
-                <div className="flex justify-between"><span>국민연금보험료</span><span className="tabular-nums">{fmt(pensionPremium)}</span></div>
-              )}
-              {otherDeduction > 0 && (
-                <div className="flex justify-between"><span>기타 소득공제</span><span className="tabular-nums">{fmt(otherDeduction)}</span></div>
-              )}
+      return (
+        <div className="rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col h-full">
+          <div className={`${headerBg} text-white p-3 flex-shrink-0`}>
+            <div className="flex items-baseline justify-between">
+              <span className="text-xs opacity-90">{headerLabel}</span>
+              <span className="text-2xl font-bold tabular-nums leading-tight">
+                {fmt(result.totalBurden)}
+                <span className="text-sm font-normal opacity-80 ml-1">원</span>
+              </span>
             </div>
           </div>
 
-          <div className="flex justify-between items-center text-[16px] bg-slate-100 px-2 -mx-1 rounded font-semibold text-slate-800 py-1">
-            <span>= 과세표준</span>
-            <span className="tabular-nums">{fmt(result.taxBase)}원</span>
-          </div>
+          <div className="flex-1 flex flex-col justify-between p-3 overflow-hidden">
+            <div className="text-xs font-bold text-slate-800">상세 계산 내역</div>
 
-          <div className="flex justify-between items-center text-[15px] text-slate-600">
-            <span>산출세액</span>
-            <span className="tabular-nums">{fmt(result.calculatedTax)}원</span>
-          </div>
+            <div className="flex justify-between items-center text-[15px] text-slate-600">
+              <span>종합소득금액</span>
+              <span className="tabular-nums">{fmt(result.totalIncome)}원</span>
+            </div>
 
-          <div className="flex justify-between items-center text-[13px] text-slate-700">
-            <span>(−) 세액공제</span>
-            <span className="tabular-nums">{fmt(taxCredit)}원</span>
-          </div>
-
-          <div className="flex justify-between items-center text-[16px] bg-blue-50 px-2 -mx-1 rounded font-semibold text-blue-700 py-1">
-            <span>= 결정세액</span>
-            <span className="tabular-nums">{fmt(result.decidedTax)}원</span>
-          </div>
-
-          {prepaid > 0 && (
-            <>
+            <div>
               <div className="flex justify-between items-center text-[13px] text-slate-700">
-                <span>(−) 기납부세액</span>
-                <span className="tabular-nums">{fmt(prepaid)}원</span>
+                <span>(−) 종합소득공제</span>
+                <span className="tabular-nums">{fmt(result.totalDeduction)}원</span>
               </div>
-              <div className="flex justify-between items-center text-[15px] font-semibold text-slate-800">
-                <span>{result.finalTax >= 0 ? "차감납부할 세액" : "환급예정세액"}</span>
-                <span className={`tabular-nums ${result.finalTax < 0 ? "text-emerald-600" : ""}`}>
-                  {fmt(result.finalTax)}원
-                </span>
+              <div className="pl-3 text-[11px] text-slate-500 mt-0.5 space-y-0">
+                <div className="flex justify-between">
+                  <span>인적공제 (본인{result.elderlyCount > 0 ? "·경로" : ""}{result.disabledCount > 0 ? "·장애" : ""})</span>
+                  <span className="tabular-nums">{fmt(result.personalDeduction)}</span>
+                </div>
+                {pensionPremium > 0 && (
+                  <div className="flex justify-between"><span>국민연금보험료</span><span className="tabular-nums">{fmt(pensionPremium)}</span></div>
+                )}
+                {otherDeduction > 0 && (
+                  <div className="flex justify-between"><span>기타 소득공제</span><span className="tabular-nums">{fmt(otherDeduction)}</span></div>
+                )}
               </div>
-            </>
-          )}
+            </div>
 
-          <div className="flex justify-between items-center text-[13px] text-slate-700">
-            <span>지방소득세 (×10%)</span>
-            <span className="tabular-nums">{fmt(result.localTax)}원</span>
-          </div>
+            <div className="flex justify-between items-center text-[16px] bg-slate-100 px-2 -mx-1 rounded font-semibold text-slate-800 py-1">
+              <span>= 과세표준</span>
+              <span className="tabular-nums">{fmt(result.taxBase)}원</span>
+            </div>
 
-          <div className="flex justify-between items-center text-[17px] bg-blue-100 px-2 -mx-1 rounded font-bold text-blue-700 py-1.5">
-            <span>총 부담세액</span>
-            <span className="tabular-nums">{fmt(result.totalBurden)}원</span>
+            <div className="flex justify-between items-center text-[15px] text-slate-600">
+              <span>산출세액</span>
+              <span className="tabular-nums">{fmt(result.calculatedTax)}원</span>
+            </div>
+
+            <div className="flex justify-between items-center text-[13px] text-slate-700">
+              <span>(−) 세액공제</span>
+              <span className="tabular-nums">{fmt(taxCredit)}원</span>
+            </div>
+
+            <div className="flex justify-between items-center text-[16px] bg-blue-50 px-2 -mx-1 rounded font-semibold text-blue-700 py-1">
+              <span>= 결정세액</span>
+              <span className="tabular-nums">{fmt(result.decidedTax)}원</span>
+            </div>
+
+            {!isZeroPrepaid && (
+              <>
+                <div className="flex justify-between items-center text-[13px] text-slate-700">
+                  <span>(−) 기납부세액</span>
+                  <span className="tabular-nums">{fmt(prepaid)}원</span>
+                </div>
+                <div className={`flex justify-between items-center text-[14px] font-semibold ${isRefund ? "text-emerald-700" : "text-slate-800"}`}>
+                  <span>{incomeTaxLabel}</span>
+                  <span className={`tabular-nums ${refundColor}`}>{fmt(finalTaxAbs)}원</span>
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-between items-center text-[13px] text-slate-700">
+              <span>{localLabel}</span>
+              <span className={`tabular-nums ${refundColor}`}>{fmt(result.localTax)}원</span>
+            </div>
+
+            <div className={`flex justify-between items-center text-[17px] ${subTotalBox} px-2 -mx-1 rounded font-bold py-1.5`}>
+              <span>{sumLabel}</span>
+              <span className="tabular-nums">{fmt(result.totalBurden)}원</span>
+            </div>
           </div>
         </div>
-      </div>
-    );
+      );
+    };
 
     function App() {
       const containerRef = useRef(null);
@@ -648,15 +658,25 @@
         const taxBase = Math.max(0, totalIncome - totalDeduction);
         const { tax: calculatedTax, bracket, marginalRate } = calcTax(taxBase);
         const decidedTax = Math.max(0, calculatedTax - taxCredit);
-        const finalTax = decidedTax - prepaid;
-        const localTax = Math.floor(decidedTax * 0.1);
-        const totalBurden = decidedTax + localTax;
+        const finalTax = decidedTax - prepaid; // 양수: 차감납부, 음수: 환급
+        const isZeroPrepaid = prepaid === 0;
+        const isRefund = !isZeroPrepaid && finalTax < 0;
+
+        // 헤더 한 줄 요약 기준 금액
+        //  - 기납부 0  → 결정세액 × 1.1
+        //  - 결정 > 기납부 → (결정 − 기납부) × 1.1
+        //  - 결정 < 기납부 → (기납부 − 결정) × 1.1
+        const headerBase = isZeroPrepaid ? decidedTax : Math.abs(finalTax);
+        const localTax = Math.floor(headerBase * 0.1);
+        const totalBurden = headerBase + localTax;
+
         const avgRate = totalIncome > 0 ? (totalBurden / totalIncome) * 100 : 0;
         return {
           totalIncome, basicDeduction, elderlyCount, elderlyDed,
           disabledCount, disabledDed, personalDeduction, totalDeduction,
           taxBase, calculatedTax, bracket, marginalRate,
           decidedTax, finalTax, localTax, totalBurden, avgRate,
+          isZeroPrepaid, isRefund, headerBase,
         };
       }, [businessIncome, laborIncome, otherIncome, selfRrn, selfDisabled, pensionPremium, otherDeduction, taxCredit, prepaid]);
 
