@@ -81,6 +81,11 @@
     const TAX_YEAR = 2025;
     const WITHHOLDING_RATE = 0.03; // 인적용역 원천징수율 3% 고정
 
+    // 2026년 지역가입자 건강보험+장기요양 통합요율
+    // 건보료율 7.19% × (1 + 장기요양율 13.14%) = 8.1348%
+    const HEALTH_INSURANCE_RATE = 0.0719;
+    const LTC_RATIO = 0.1314;
+
     const BRACKETS = [
       { limit: 14_000_000,    rate: 0.06, deduction: 0,          label: "1,400만원 이하" },
       { limit: 50_000_000,    rate: 0.15, deduction: 1_260_000,  label: "1,400만~5,000만원" },
@@ -460,9 +465,10 @@
       const { isRefund, isZeroPrepaid } = result;
       const finalTaxAbs = Math.abs(result.finalTax);
 
-      // 헤더 분기
-      const headerLabel = isRefund ? "환급예정세액 · 실시간" : "총 부담세액 · 실시간";
-      const headerBg = isRefund ? "bg-emerald-600" : "bg-blue-600";
+      // 헤더 분기 (환급: 기존, 비환급: 실질 총부담)
+      const headerLabel = isRefund ? "환급예정세액 · 실시간" : "실질 총부담 (세금+건보) · 실시간";
+      const headerStyle = { backgroundColor: isRefund ? "#059669" : "#0C447C" };
+      const headerAmount = isRefund ? result.totalBurden : result.realTotalBurden;
 
       // 상세 내역 라벨/색상 분기
       const incomeTaxLabel = isRefund ? "환급예정세액 (소득세분)" : "차감납부할 세액 (소득세분)";
@@ -471,15 +477,14 @@
       const subTotalBox    = isRefund
         ? "bg-emerald-100 text-emerald-700"
         : "bg-blue-100 text-blue-700";
-      const sumLabel       = isRefund ? "총 환급예정세액" : "총 부담세액";
 
       return (
         <div className="print-result rounded-lg border border-slate-200 bg-white overflow-hidden flex flex-col h-full">
-          <div className={`${headerBg} text-white p-3 flex-shrink-0`}>
+          <div className="text-white p-3 flex-shrink-0" style={headerStyle}>
             <div className="flex items-baseline justify-between">
               <span className="text-xs opacity-90">{headerLabel}</span>
               <span className="text-2xl font-bold tabular-nums leading-tight">
-                {fmt(result.totalBurden)}
+                {fmt(headerAmount)}
                 <span className="text-sm font-normal opacity-80 ml-1">원</span>
               </span>
             </div>
@@ -550,11 +555,35 @@
               <span className={`tabular-nums ${refundColor}`}>{fmt(result.localTax)}원</span>
             </div>
 
-            <div className={`flex justify-between items-center text-[17px] ${subTotalBox} px-2 -mx-1 rounded font-bold py-1.5`}>
-              <span>{sumLabel}</span>
-              <span className="tabular-nums">{fmt(result.totalBurden)}원</span>
-            </div>
+            {/* 환급 케이스: 기존 단일 합계 행 */}
+            {isRefund && (
+              <div className={`flex justify-between items-center text-[17px] ${subTotalBox} px-2 -mx-1 rounded font-bold py-1.5`}>
+                <span>총 환급예정세액</span>
+                <span className="tabular-nums">{fmt(result.totalBurden)}원</span>
+              </div>
+            )}
+
+            {/* 비환급 케이스: 세금 소계 + 건보+장기요양 (동일 파란색) */}
+            {!isRefund && (
+              <>
+                <div className={`flex justify-between items-center text-[15px] ${subTotalBox} px-2 -mx-1 rounded font-semibold py-1`}>
+                  <span>총 부담세액 (소계)</span>
+                  <span className="tabular-nums">{fmt(result.totalBurden)}원</span>
+                </div>
+                <div className={`flex justify-between items-center text-[15px] ${subTotalBox} px-2 -mx-1 rounded font-semibold py-1`}>
+                  <span>건보+장기요양 (소득×8.13%)</span>
+                  <span className="tabular-nums">{fmt(result.healthInsurance)}원</span>
+                </div>
+              </>
+            )}
           </div>
+
+          {/* 단서 (비환급 케이스만, 카드 안 하단) */}
+          {!isRefund && (
+            <div className="flex-shrink-0 px-3 py-1 bg-slate-50 text-[10px] text-slate-500 leading-tight border-t border-slate-100">
+              8.13% = 7.19% × 1.1314 (2026년 지역가입자 건보+장기요양 통합요율)
+            </div>
+          )}
         </div>
       );
     };
@@ -671,13 +700,8 @@
       }, []);
 
       const handleUpdate = () => {
-        // 쿼리 파라미터·해시 모두 제거한 클린 URL로 이동 후 새로고침
-        const cleanUrl = window.location.origin + window.location.pathname;
-        if (window.location.href !== cleanUrl) {
-          window.location.replace(cleanUrl);
-        } else {
-          window.location.reload();
-        }
+        // URL 변경 없는 일반 새로고침 (CDN으로 React/Tailwind 등이 로드되므로 충분)
+        window.location.reload();
       };
 
       const handlePrint = () => {
@@ -742,6 +766,13 @@
         const localTax = Math.floor(headerBase * 0.1);
         const totalBurden = headerBase + localTax;
 
+        // 2026년 지역가입자 건보+장기요양 (단순화: 종합소득금액 × 8.13%)
+        // 환급 케이스(isRefund)에서는 계산·표시하지 않음
+        const healthInsurance = !isRefund && totalIncome > 0
+          ? Math.floor(totalIncome * HEALTH_INSURANCE_RATE * (1 + LTC_RATIO))
+          : 0;
+        const realTotalBurden = totalBurden + healthInsurance;
+
         const avgRate = totalIncome > 0 ? (totalBurden / totalIncome) * 100 : 0;
         return {
           totalIncome, basicDeduction, elderlyCount, elderlyDed,
@@ -749,6 +780,7 @@
           taxBase, calculatedTax, bracket, marginalRate,
           decidedTax, finalTax, localTax, totalBurden, avgRate,
           isZeroPrepaid, isRefund, headerBase,
+          healthInsurance, realTotalBurden,
         };
       }, [businessIncome, laborIncome, otherIncome, selfRrn, selfDisabled, pensionPremium, otherDeduction, taxCredit, prepaid]);
 
@@ -804,6 +836,9 @@
                 </span>
                 <span className="text-[11px] px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded font-semibold hidden md:inline">
                   인적용역 940xxx 자동환산
+                </span>
+                <span className="text-[11px] px-1.5 py-0.5 bg-cyan-50 text-cyan-700 rounded font-semibold hidden md:inline">
+                  지역건보 합산 (소득×8.13%)
                 </span>
               </div>
               <div className="no-print flex items-center gap-2 text-[11px] text-slate-500">
